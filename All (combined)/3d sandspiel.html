@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Sandspiel</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Inter', sans-serif; background-color: #1a1a1a; }
+        canvas { display: block; width: 100%; height: 100%; }
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 2px;
+            height: 2px;
+            background-color: white;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 100;
+        }
+        #message-box {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 16px;
+            z-index: 200;
+            display: none; /* Hidden by default */
+            text-align: center;
+        }
+        #instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            font-size: 14px;
+            text-align: center;
+            z-index: 200;
+            line-height: 1.5;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            max-width: 90%;
+        }
+        #instructions p {
+            margin: 5px 0;
+        }
+        #instructions strong {
+            color: #4CAF50;
+        }
+        #material-selector {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 200;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .material-item {
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.2s ease;
+        }
+        .material-item.selected {
+            border: 1px solid #4CAF50;
+            background-color: rgba(76, 175, 80, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <div id="crosshair"></div>
+    <div id="message-box"></div>
+    <div id="instructions">
+        <p>Click anywhere to start!</p>
+        <p><strong>WASD</strong> to move, <strong>Mouse</strong> to look around.</p>
+        <p><strong>Left Click</strong> to place, <strong>Right Click</strong> to remove.</p>
+        <p><strong>Spacebar</strong> to jump, <strong>Shift</strong> to crouch.</p>
+        <p><strong>0: Air, 1: Sand, 2: Water, 3: Stone, 4: Glass, 5: Powder</strong> to select material.</p>
+    </div>
+    <div id="material-selector">
+        <span>Current Material:</span>
+        <div id="material-air" class="material-item">0: Air</div>
+        <div id="material-sand" class="material-item selected">1: Sand</div>
+        <div id="material-water" class="material-item">2: Water</div>
+        <div id="material-stone" class="material-item">3: Stone</div>
+        <div id="material-glass" class="material-item">4: Glass</div>
+        <div id="material-powder" class="material-item">5: Powder</div>
+    </div>
+
+    <script>
+        // --- Global Variables ---
+        let scene, camera, renderer;
+        let controls; // For first-person movement
+        let raycaster; // For placing/removing voxels
+        let pointerLocked = false;
+
+        // Player movement state
+        const moveState = {
+            forward: false,
+            backward: false,
+            left: false,
+            right: false,
+            jump: false,
+            crouch: false
+        };
+        const playerVelocity = new THREE.Vector3();
+        const PLAYER_SPEED = 5;
+        const JUMP_POWER = 8;
+        const GRAVITY = -20;
+        let onGround = false;
+
+        // Voxel grid settings
+        const VOXEL_SIZE = 1;
+        const GRID_DIMENSIONS = { x: 32, y: 32, z: 32 }; // Smaller grid for simplicity
+        const grid = []; // 3D array to store voxel types (0: empty, 1: sand, 2: water, 3: ground/stone, 4: glass, 5: powder)
+        const voxelMeshes = new Map(); // Map to store THREE.Mesh objects for voxels
+
+        // Material types
+        const MATERIAL_EMPTY = 0; // Represents empty space / Air
+        const MATERIAL_SAND = 1;
+        const MATERIAL_WATER = 2;
+        const MATERIAL_STONE = 3;
+        const MATERIAL_GLASS = 4; // New material: Glass
+        const MATERIAL_POWDER = 5; // New material: Powder
+
+        let currentMaterialType = MATERIAL_SAND; // Default to sand
+
+        // Materials
+        let sandMaterial;
+        let waterMaterial;
+        let groundMaterial;
+        let glassMaterial; // New material variable
+        let powderMaterial; // New material variable
+
+        const clock = new THREE.Clock();
+        const textureLoader = new THREE.TextureLoader();
+
+        // Simulation speed control
+        const SIMULATION_INTERVAL_MS = 100; // Update physics every 100ms
+        let lastSimulationTime = 0;
+
+        // --- Utility Functions ---
+
+        /**
+         * Shows a temporary message to the user.
+         * @param {string} message - The message to display.
+         * @param {number} duration - How long to display the message in milliseconds.
+         */
+        function showMessage(message, duration = 2000) {
+            const messageBox = document.getElementById('message-box');
+            messageBox.textContent = message;
+            messageBox.style.display = 'block';
+            setTimeout(() => {
+                messageBox.style.display = 'none';
+            }, duration);
+        }
+
+        /**
+         * Updates the UI to show the selected material.
+         */
+        function updateMaterialSelectorUI() {
+            document.querySelectorAll('.material-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            switch (currentMaterialType) {
+                case MATERIAL_EMPTY:
+                    document.getElementById('material-air').classList.add('selected');
+                    showMessage("Material: Air selected", 1000);
+                    break;
+                case MATERIAL_SAND:
+                    document.getElementById('material-sand').classList.add('selected');
+                    showMessage("Material: Sand selected", 1000);
+                    break;
+                case MATERIAL_WATER:
+                    document.getElementById('material-water').classList.add('selected');
+                    showMessage("Material: Water selected", 1000);
+                    break;
+                case MATERIAL_STONE:
+                    document.getElementById('material-stone').classList.add('selected');
+                    showMessage("Material: Stone selected", 1000);
+                    break;
+                case MATERIAL_GLASS: // New UI update for Glass
+                    document.getElementById('material-glass').classList.add('selected');
+                    showMessage("Material: Glass selected", 1000);
+                    break;
+                case MATERIAL_POWDER: // New UI update for Powder
+                    document.getElementById('material-powder').classList.add('selected');
+                    showMessage("Material: Powder selected", 1000);
+                    break;
+            }
+        }
+
+        /**
+         * Converts world coordinates to grid coordinates.
+         * @param {number} x - World X coordinate.
+         * @param {number} y - World Y coordinate.
+         * @param {number} z - World Z coordinate.
+         * @returns {THREE.Vector3} - Grid coordinates.
+         */
+        function worldToGrid(x, y, z) {
+            return new THREE.Vector3(
+                Math.floor(x / VOXEL_SIZE + GRID_DIMENSIONS.x / 2),
+                Math.floor(y / VOXEL_SIZE), // Y starts from 0 at ground level
+                Math.floor(z / VOXEL_SIZE + GRID_DIMENSIONS.z / 2)
+            );
+        }
+
+        /**
+         * Converts grid coordinates to world coordinates (center of voxel).
+         * @param {number} gx - Grid X coordinate.
+         * @param {number} gy - Grid Y coordinate.
+         * @param {number} gz - Grid Z coordinate.
+         * @returns {THREE.Vector3} - World coordinates.
+         */
+        function gridToWorld(gx, gy, gz) {
+            return new THREE.Vector3(
+                (gx - GRID_DIMENSIONS.x / 2) * VOXEL_SIZE + VOXEL_SIZE / 2,
+                gy * VOXEL_SIZE + VOXEL_SIZE / 2,
+                (gz - GRID_DIMENSIONS.z / 2) * VOXEL_SIZE + VOXEL_SIZE / 2
+            );
+        }
+
+        /**
+         * Gets the voxel type at specific grid coordinates.
+         * @param {number} gx - Grid X coordinate.
+         * @param {number} gy - Grid Y coordinate.
+         * @param {number} gz - Grid Z coordinate.
+         * @returns {number} - Voxel type (0, 1, 2, 3, 4, or 5) or -1 if out of bounds.
+         */
+        function getVoxel(gx, gy, gz) {
+            if (gx >= 0 && gx < GRID_DIMENSIONS.x &&
+                gy >= 0 && gy < GRID_DIMENSIONS.y &&
+                gz >= 0 && gz < GRID_DIMENSIONS.z) {
+                return grid[gx][gy][gz];
+            }
+            return -1; // Out of bounds
+        }
+
+        /**
+         * Sets the voxel type at specific grid coordinates and updates its mesh.
+         * @param {number} gx - Grid X coordinate.
+         * @param {number} gy - Grid Y coordinate.
+         * @param {number} gz - Grid Z coordinate.
+         * @param {number} type - New voxel type.
+         */
+        function setVoxel(gx, gy, gz, type) {
+            if (gx >= 0 && gx < GRID_DIMENSIONS.x &&
+                gy >= 0 && gy < GRID_DIMENSIONS.y &&
+                gz >= 0 && gz < GRID_DIMENSIONS.z) {
+                grid[gx][gy][gz] = type;
+                const key = `${gx},${gy},${gz}`;
+
+                if (type === MATERIAL_EMPTY) {
+                    if (voxelMeshes.has(key)) {
+                        scene.remove(voxelMeshes.get(key));
+                        voxelMeshes.delete(key);
+                    }
+                } else {
+                    let mesh = voxelMeshes.get(key);
+                    if (!mesh) {
+                        const geometry = new THREE.BoxGeometry(VOXEL_SIZE, VOXEL_SIZE, VOXEL_SIZE);
+                        mesh = new THREE.Mesh(geometry);
+                        const worldPos = gridToWorld(gx, gy, gz);
+                        mesh.position.set(worldPos.x, worldPos.y, worldPos.z);
+                        mesh.castShadow = true;
+                        mesh.receiveShadow = true;
+                        voxelMeshes.set(key, mesh);
+                        scene.add(mesh);
+                    }
+                    switch (type) {
+                        case MATERIAL_SAND:
+                            mesh.material = sandMaterial;
+                            break;
+                        case MATERIAL_WATER:
+                            mesh.material = waterMaterial;
+                            break;
+                        case MATERIAL_STONE:
+                            mesh.material = groundMaterial;
+                            break;
+                        case MATERIAL_GLASS: // Assign glass material
+                            mesh.material = glassMaterial;
+                            break;
+                        case MATERIAL_POWDER: // Assign powder material
+                            mesh.material = powderMaterial;
+                            break;
+                    }
+                }
+            }
+        }
+
+        // --- Initialization ---
+
+        function init() {
+            // Scene setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Sky blue background
+
+            // Camera setup
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, VOXEL_SIZE * 1.5, 0); // Start slightly above ground, player height
+            camera.rotation.order = 'YXZ'; // Set rotation order for intuitive FPS controls (Yaw, Pitch, Roll)
+
+            // Renderer setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true; // Enable shadow maps
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Softer shadows
+            document.body.appendChild(renderer.domElement);
+
+            // Load textures
+            const sandTexture = textureLoader.load('https://placehold.co/64x64/FFD700/000000?text=SAND',
+                () => {}, // onProgress callback
+                (error) => { console.error('Error loading sand texture:', error); }
+            );
+            const groundTexture = textureLoader.load('https://placehold.co/64x64/808080/FFFFFF?text=STONE',
+                () => {}, // onProgress callback
+                (error) => { console.error('Error loading ground texture:', error); }
+            );
+            const powderTexture = textureLoader.load('https://placehold.co/64x64/E0E0E0/000000?text=POWDER', // Light grey for powder
+                () => {}, // onProgress callback
+                (error) => { console.error('Error loading powder texture:', error); }
+            );
+
+
+            sandMaterial = new THREE.MeshLambertMaterial({ map: sandTexture });
+            waterMaterial = new THREE.MeshLambertMaterial({ color: 0x4287f5, transparent: true, opacity: 0.7 }); // Blue, semi-transparent
+            groundMaterial = new THREE.MeshLambertMaterial({ map: groundTexture });
+            glassMaterial = new THREE.MeshLambertMaterial({ color: 0xc0c0c0, transparent: true, opacity: 0.3 }); // Light grey, semi-transparent
+            powderMaterial = new THREE.MeshLambertMaterial({ map: powderTexture });
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0x404040); // Soft white light
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 20, 10); // Position the light
+            directionalLight.castShadow = true; // Enable light to cast shadows
+            directionalLight.shadow.mapSize.width = 2048; // Higher resolution shadows
+            directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 50;
+            directionalLight.shadow.camera.left = -20;
+            directionalLight.shadow.camera.right = 20;
+            directionalLight.shadow.camera.top = 20;
+            directionalLight.shadow.camera.bottom = -20;
+            scene.add(directionalLight);
+
+            // Raycaster for interaction
+            raycaster = new THREE.Raycaster();
+
+            // Initialize grid and ground
+            for (let x = 0; x < GRID_DIMENSIONS.x; x++) {
+                grid[x] = [];
+                for (let y = 0; y < GRID_DIMENSIONS.y; y++) {
+                    grid[x][y] = [];
+                    for (let z = 0; z < GRID_DIMENSIONS.z; z++) {
+                        grid[x][y][z] = MATERIAL_EMPTY; // Initialize as empty
+                    }
+                }
+            }
+
+            // Create a flat ground layer
+            for (let x = 0; x < GRID_DIMENSIONS.x; x++) {
+                for (let z = 0; z < GRID_DIMENSIONS.z; z++) {
+                    setVoxel(x, 0, z, MATERIAL_STONE); // Type 3 for stone ground
+                }
+            }
+
+            // Event Listeners
+            document.addEventListener('mousemove', onMouseMove, false);
+            document.addEventListener('keydown', onKeyDown, false);
+            document.addEventListener('keyup', onKeyUp, false);
+            document.addEventListener('click', onClick, false); // For pointer lock
+            document.addEventListener('contextmenu', onRightClick, false); // For removing sand
+
+            // Handle window resizing
+            window.addEventListener('resize', onWindowResize, false);
+
+            // Initial message
+            showMessage("Click to enter first-person mode!", 5000);
+            updateMaterialSelectorUI(); // Set initial UI for material selector
+            console.log("Init complete, starting animation."); // Debugging log
+        }
+
+        // --- Event Handlers ---
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onMouseMove(event) {
+            if (!pointerLocked) return;
+
+            const movementX = event.movementX || event.mozMovementX || event.webkitMovementX || 0;
+            const movementY = event.movementY || event.mozMovementY || event.webkitMovementY || 0;
+
+            // Rotate camera based on mouse movement
+            // movementX controls yaw (rotation around Y-axis)
+            camera.rotation.y -= movementX * 0.002;
+            // movementY controls pitch (rotation around X-axis)
+            camera.rotation.x -= movementY * 0.002;
+
+            // Clamp vertical rotation (pitch) to prevent flipping
+            camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
+        }
+
+        function onKeyDown(event) {
+            if (!pointerLocked) return;
+            switch (event.code) {
+                case 'KeyW': moveState.forward = true; break;
+                case 'KeyS': moveState.backward = true; break;
+                case 'KeyA': moveState.left = true; break; // 'A' for left (strafe left)
+                case 'KeyD': moveState.right = true; break; // 'D' for right (strafe right)
+                case 'Space':
+                    if (onGround) {
+                        playerVelocity.y = JUMP_POWER;
+                        onGround = false;
+                    }
+                    moveState.jump = true;
+                    break;
+                case 'ShiftLeft': moveState.crouch = true; break;
+                case 'Digit0': currentMaterialType = MATERIAL_EMPTY; updateMaterialSelectorUI(); break; // Select Air
+                case 'Digit1': currentMaterialType = MATERIAL_SAND; updateMaterialSelectorUI(); break;
+                case 'Digit2': currentMaterialType = MATERIAL_WATER; updateMaterialSelectorUI(); break;
+                case 'Digit3': currentMaterialType = MATERIAL_STONE; updateMaterialSelectorUI(); break;
+                case 'Digit4': currentMaterialType = MATERIAL_GLASS; updateMaterialSelectorUI(); break; // Select Glass
+                case 'Digit5': currentMaterialType = MATERIAL_POWDER; updateMaterialSelectorUI(); break; // Select Powder
+            }
+        }
+
+        function onKeyUp(event) {
+            if (!pointerLocked) return;
+            switch (event.code) {
+                case 'KeyW': moveState.forward = false; break;
+                case 'KeyS': moveState.backward = false; break;
+                case 'KeyA': moveState.left = false; break;
+                case 'KeyD': moveState.right = false; break;
+                case 'Space': moveState.jump = false; break;
+                case 'ShiftLeft': moveState.crouch = false; break;
+            }
+        }
+
+        function onClick(event) {
+            if (!pointerLocked) {
+                document.body.requestPointerLock();
+                document.getElementById('instructions').style.display = 'none';
+            } else if (event.button === 0) { // Left click to place current material
+                placeVoxel(currentMaterialType);
+            }
+        }
+
+        function onRightClick(event) {
+            event.preventDefault(); // Prevent context menu
+            console.log("Right click event fired!"); // Debugging log
+            if (pointerLocked) {
+                removeVoxel();
+            }
+        }
+
+        document.addEventListener('pointerlockchange', () => {
+            pointerLocked = document.pointerLockElement === document.body;
+            if (pointerLocked) {
+                document.getElementById('crosshair').style.display = 'block';
+            } else {
+                document.getElementById('crosshair').style.display = 'none';
+                document.getElementById('instructions').style.display = 'block'; // Show instructions again
+            }
+        });
+
+        document.addEventListener('pointerlockerror', () => {
+            showMessage("Pointer Lock Error: Could not lock pointer. Try clicking again.", 3000);
+        });
+
+        /**
+         * Places a voxel in the world based on raycasting from the crosshair.
+         * @param {number} type - The type of voxel to place.
+         */
+        function placeVoxel(type) {
+            // If the selected type is MATERIAL_EMPTY, we want to remove a voxel.
+            // This is handled by the removeVoxel function.
+            if (type === MATERIAL_EMPTY) {
+                removeVoxel();
+                return; // Exit the function as removeVoxel handles the action
+            }
+
+            // For other materials, proceed with placing a voxel
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera); // (0,0) is center of screen
+
+            const intersects = raycaster.intersectObjects(Array.from(voxelMeshes.values()));
+
+            if (intersects.length > 0) {
+                const intersect = intersects[0];
+                const face = intersect.face;
+                const normal = face.normal; // Normal of the intersected face
+
+                // Get the position of the intersected voxel in grid coordinates
+                const intersectedVoxelWorldPos = intersect.object.position;
+                const intersectedVoxelGridPos = worldToGrid(
+                    intersectedVoxelWorldPos.x,
+                    intersectedVoxelWorldPos.y,
+                    intersectedVoxelWorldPos.z
+                );
+
+                // Calculate the position for the new voxel based on the normal
+                const newVoxelGridX = intersectedVoxelGridPos.x + normal.x;
+                const newVoxelGridY = intersectedVoxelGridPos.y + normal.y;
+                const newVoxelGridZ = intersectedVoxelGridPos.z + normal.z;
+
+                // Only place if the target space is empty
+                if (getVoxel(newVoxelGridX, newVoxelGridY, newVoxelGridZ) === MATERIAL_EMPTY) {
+                    setVoxel(newVoxelGridX, newVoxelGridY, newVoxelGridZ, type);
+                } else {
+                    showMessage("Space already occupied or out of bounds!", 1500);
+                }
+            } else {
+                // If no voxel is intersected, place it a fixed distance in front of the camera
+                const targetDistance = 5 * VOXEL_SIZE;
+                const targetWorldPos = new THREE.Vector3();
+                camera.getWorldDirection(targetWorldPos).multiplyScalar(targetDistance).add(camera.position);
+
+                const newVoxelGridPos = worldToGrid(targetWorldPos.x, targetWorldPos.y, targetWorldPos.z);
+                const newVoxelGridX = newVoxelGridPos.x;
+                const newVoxelGridY = newVoxelGridPos.y;
+                const newVoxelGridZ = newVoxelGridPos.z;
+
+                // Only place if the target space is empty
+                if (getVoxel(newVoxelGridX, newVoxelGridY, newVoxelGridZ) === MATERIAL_EMPTY) {
+                    setVoxel(newVoxelGridX, newVoxelGridY, newVoxelGridZ, type);
+                } else {
+                    showMessage("Space already occupied or out of bounds!", 1500);
+                }
+            }
+        }
+
+        /**
+         * Removes a voxel from the world based on raycasting from the crosshair.
+         */
+        function removeVoxel() {
+            console.log("removeVoxel called."); // Debugging log
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera); // (0,0) is center of screen
+
+            const intersects = raycaster.intersectObjects(Array.from(voxelMeshes.values()));
+            console.log("Intersects found:", intersects.length); // Debugging log
+
+            if (intersects.length > 0) {
+                const intersect = intersects[0];
+                const intersectedVoxelWorldPos = intersect.object.position;
+                const intersectedVoxelGridPos = worldToGrid(
+                    intersectedVoxelWorldPos.x,
+                    intersectedVoxelWorldPos.y,
+                    intersectedVoxelWorldPos.z
+                );
+
+                const voxelType = getVoxel(intersectedVoxelGridPos.x, intersectedVoxelGridPos.y, intersectedVoxelGridPos.z);
+
+                // Only remove if it's not empty
+                if (voxelType !== MATERIAL_EMPTY) {
+                     // Prevent removing the very bottom ground layer
+                    if (intersectedVoxelGridPos.y === 0 && voxelType === MATERIAL_STONE) {
+                        showMessage("Cannot remove the base ground!", 1500);
+                        return;
+                    }
+                    setVoxel(intersectedVoxelGridPos.x, intersectedVoxelGridPos.y, intersectedVoxelGridPos.z, MATERIAL_EMPTY); // Set to empty
+                    console.log(`Voxel at ${intersectedVoxelGridPos.x},${intersectedVoxelGridPos.y},${intersectedVoxelGridPos.z} removed.`); // Debugging log
+                }
+            } else {
+                showMessage("No voxel to remove!", 1500);
+            }
+        }
+
+        // --- Player Movement Update ---
+
+        function updatePlayer(delta) {
+            // Apply gravity
+            playerVelocity.y += GRAVITY * delta;
+
+            // Get camera's forward and right vectors
+            const forward = new THREE.Vector3();
+            camera.getWorldDirection(forward);
+            forward.y = 0; // Keep movement horizontal
+            forward.normalize();
+
+            const right = new THREE.Vector3(); // Corrected: Removed duplicate 'new'
+            // Corrected: crossVectors(forward, camera.up) will give the vector to the right
+            // if forward is -Z and up is +Y, then forward x up is +X.
+            right.crossVectors(forward, camera.up);
+            right.y = 0; // Keep movement horizontal
+            right.normalize();
+
+            // Zero out horizontal velocity before applying new movement, or it accumulates
+            playerVelocity.x = 0;
+            playerVelocity.z = 0;
+
+            // Apply movement based on input and camera direction
+            if (moveState.forward) {
+                playerVelocity.addScaledVector(forward, PLAYER_SPEED);
+            }
+            if (moveState.backward) {
+                playerVelocity.addScaledVector(forward, -PLAYER_SPEED);
+            }
+            if (moveState.left) { // 'A' for left (strafe left)
+                playerVelocity.addScaledVector(right, -PLAYER_SPEED); // Move opposite to 'right' vector
+            }
+            if (moveState.right) { // 'D' for right (strafe right)
+                playerVelocity.addScaledVector(right, PLAYER_SPEED); // Move along 'right' vector
+            }
+
+            // Apply friction/damping to horizontal velocity
+            playerVelocity.x *= (1 - 0.1 * delta);
+            playerVelocity.z *= (1 - 0.1 * delta);
+
+            // Proposed new position
+            let newPosX = camera.position.x + playerVelocity.x * delta;
+            let newPosY = camera.position.y + playerVelocity.y * delta;
+            let newPosZ = camera.position.z + playerVelocity.z * delta;
+
+            // Simple Player-Voxel Collision (Floor, Ceiling, and Horizontal)
+            // Player is assumed to be 1.5 voxels high for collision checks
+            const playerHeight = VOXEL_SIZE * 1.5;
+            const playerHalfWidth = VOXEL_SIZE * 0.4; // Slightly smaller than half a voxel to avoid immediate sticking
+
+            const currentGridX = Math.floor(camera.position.x / VOXEL_SIZE + GRID_DIMENSIONS.x / 2);
+            const currentGridY = Math.floor(camera.position.y / VOXEL_SIZE);
+            const currentGridZ = Math.floor(camera.position.z / VOXEL_SIZE + GRID_DIMENSIONS.z / 2);
+
+            // Vertical collision (Y-axis)
+            const playerFeetY = Math.floor((newPosY - playerHeight / 2) / VOXEL_SIZE);
+            const playerHeadY = Math.floor((newPosY + playerHeight / 2) / VOXEL_SIZE);
+
+            // Check for collision below (floor)
+            if (getVoxel(currentGridX, playerFeetY, currentGridZ) !== MATERIAL_EMPTY) {
+                newPosY = (playerFeetY + 1) * VOXEL_SIZE + playerHeight / 2; // Snap to top of voxel
+                playerVelocity.y = 0;
+                onGround = true;
+            } else {
+                onGround = false;
+            }
+
+            // Check for collision above (ceiling)
+            if (playerVelocity.y > 0 && getVoxel(currentGridX, playerHeadY, currentGridZ) !== MATERIAL_EMPTY) {
+                newPosY = (playerHeadY - 1) * VOXEL_SIZE + playerHeight / 2; // Snap to bottom of voxel
+                playerVelocity.y = 0;
+            }
+
+            // Horizontal collision (X and Z axes)
+            // Check for collision at player's feet and head level for horizontal movement
+            const checkHorizontalCollision = (targetX, targetY, targetZ) => {
+                const gridX = Math.floor(targetX / VOXEL_SIZE + GRID_DIMENSIONS.x / 2);
+                const gridY_feet = Math.floor((targetY - playerHeight / 2 + 0.1) / VOXEL_SIZE); // Small offset to check within voxel
+                const gridY_head = Math.floor((targetY + playerHeight / 2 - 0.1) / VOXEL_SIZE);
+                const gridZ = Math.floor(targetZ / VOXEL_SIZE + GRID_DIMENSIONS.z / 2);
+
+                return getVoxel(gridX, gridY_feet, gridZ) !== MATERIAL_EMPTY || getVoxel(gridX, gridY_head, gridZ) !== MATERIAL_EMPTY;
+            };
+
+            // Check X movement
+            if (playerVelocity.x !== 0) {
+                const tempX = camera.position.x + playerVelocity.x * delta;
+                if (checkHorizontalCollision(tempX, camera.position.y, camera.position.z)) {
+                    playerVelocity.x = 0;
+                }
+            }
+
+            // Check Z movement
+            if (playerVelocity.z !== 0) {
+                const tempZ = camera.position.z + playerVelocity.z * delta;
+                if (checkHorizontalCollision(camera.position.x, camera.position.y, tempZ)) {
+                    playerVelocity.z = 0;
+                }
+            }
+
+            // Update camera position with resolved values
+            camera.position.x += playerVelocity.x * delta;
+            camera.position.y = newPosY; // Use resolved Y
+            camera.position.z += playerVelocity.z * delta;
+
+            // Ensure player doesn't fall through the absolute bottom of the world
+            if (camera.position.y < VOXEL_SIZE * 0.5) {
+                camera.position.y = VOXEL_SIZE * 0.5;
+                playerVelocity.y = 0;
+                onGround = true;
+            }
+        }
+
+        // --- Voxel Simulation Update (Sand and Water) ---
+
+        function updateVoxelPhysics() {
+            // Iterate through the grid from bottom to top, and randomize X/Z for less visual artifacts
+            // This order helps stable materials accumulate at the bottom and ensures falling physics propagate correctly.
+            for (let y = 1; y < GRID_DIMENSIONS.y; y++) { // Start from y=1 (above ground)
+                const xOrder = Array.from({ length: GRID_DIMENSIONS.x }, (_, i) => i).sort(() => Math.random() - 0.5);
+                const zOrder = Array.from({ length: GRID_DIMENSIONS.z }, (_, i) => i).sort(() => Math.random() - 0.5);
+
+                for (const x of xOrder) {
+                    for (const z of zOrder) {
+                        const currentVoxelType = getVoxel(x, y, z);
+
+                        if (currentVoxelType === MATERIAL_SAND) {
+                            // Try to fall straight down
+                            if (getVoxel(x, y - 1, z) === MATERIAL_EMPTY || getVoxel(x, y - 1, z) === MATERIAL_WATER) { // Sand can fall into empty or water
+                                setVoxel(x, y, z, MATERIAL_EMPTY);
+                                setVoxel(x, y - 1, z, MATERIAL_SAND);
+                            }
+                            // Try to fall diagonally (all 8 directions) if directly below is occupied
+                            else {
+                                const possibleFallPositions = [];
+                                for (let dx = -1; dx <= 1; dx++) {
+                                    for (let dz = -1; dz <= 1; dz++) {
+                                        if (dx === 0 && dz === 0) continue; // Skip straight down, already checked
+
+                                        const targetX = x + dx;
+                                        const targetY = y - 1; // Always one level down
+                                        const targetZ = z + dz;
+
+                                        // Check if diagonal-down position is empty/water AND the path to it is clear
+                                        // The path (voxel at current Y level) must be empty for diagonal fall.
+                                        if ((getVoxel(targetX, targetY, targetZ) === MATERIAL_EMPTY || getVoxel(targetX, targetY, targetZ) === MATERIAL_WATER) &&
+                                            getVoxel(targetX, y, targetZ) === MATERIAL_EMPTY) {
+                                            possibleFallPositions.push({ x: targetX, y: targetY, z: targetZ });
+                                        }
+                                    }
+                                }
+
+                                if (possibleFallPositions.length > 0) {
+                                    const randomIndex = Math.floor(Math.random() * possibleFallPositions.length);
+                                    const chosenPos = possibleFallPositions[randomIndex];
+
+                                    setVoxel(x, y, z, MATERIAL_EMPTY);
+                                    setVoxel(chosenPos.x, chosenPos.y, chosenPos.z, MATERIAL_SAND);
+                                }
+                            }
+                        } else if (currentVoxelType === MATERIAL_WATER) {
+                            // Water prioritizes falling
+                            if (getVoxel(x, y - 1, z) === MATERIAL_EMPTY) {
+                                setVoxel(x, y, z, MATERIAL_EMPTY);
+                                setVoxel(x, y - 1, z, MATERIAL_WATER);
+                            }
+                            // Then tries to spread horizontally
+                            else {
+                                const possibleSpreadPositions = [];
+                                const horizontalDirections = [
+                                    { dx: 1, dz: 0 }, { dx: -1, dz: 0 },
+                                    { dx: 0, dz: 1 }, { dx: 0, dz: -1 }
+                                ];
+
+                                for (const dir of horizontalDirections) {
+                                    const targetX = x + dir.dx;
+                                    const targetZ = z + dir.dz;
+                                    // Water can spread if the target is empty at the same Y level
+                                    if (getVoxel(targetX, y, targetZ) === MATERIAL_EMPTY) {
+                                        possibleSpreadPositions.push({ x: targetX, y: y, z: targetZ });
+                                    }
+                                }
+
+                                if (possibleSpreadPositions.length > 0) {
+                                    const randomIndex = Math.floor(Math.random() * possibleSpreadPositions.length);
+                                    const chosenPos = possibleSpreadPositions[randomIndex];
+
+                                    setVoxel(x, y, z, MATERIAL_EMPTY);
+                                    setVoxel(chosenPos.x, chosenPos.y, chosenPos.z, MATERIAL_WATER);
+                                }
+                            }
+                        } else if (currentVoxelType === MATERIAL_POWDER) { // New: Powder physics (similar to sand)
+                            // Powder falls straight down
+                            if (getVoxel(x, y - 1, z) === MATERIAL_EMPTY || getVoxel(x, y - 1, z) === MATERIAL_WATER) {
+                                setVoxel(x, y, z, MATERIAL_EMPTY);
+                                setVoxel(x, y - 1, z, MATERIAL_POWDER);
+                            }
+                            // Or falls diagonally if blocked
+                            else {
+                                const possibleFallPositions = [];
+                                for (let dx = -1; dx <= 1; dx++) {
+                                    for (let dz = -1; dz <= 1; dz++) {
+                                        if (dx === 0 && dz === 0) continue;
+
+                                        const targetX = x + dx;
+                                        const targetY = y - 1;
+                                        const targetZ = z + dz;
+
+                                        if ((getVoxel(targetX, targetY, targetZ) === MATERIAL_EMPTY || getVoxel(targetX, targetY, targetZ) === MATERIAL_WATER) &&
+                                            getVoxel(targetX, y, targetZ) === MATERIAL_EMPTY) {
+                                            possibleFallPositions.push({ x: targetX, y: targetY, z: targetZ });
+                                        }
+                                    }
+                                }
+
+                                if (possibleFallPositions.length > 0) {
+                                    const randomIndex = Math.floor(Math.random() * possibleFallPositions.length);
+                                    const chosenPos = possibleFallPositions[randomIndex];
+
+                                    setVoxel(x, y, z, MATERIAL_EMPTY);
+                                    setVoxel(chosenPos.x, chosenPos.y, chosenPos.z, MATERIAL_POWDER);
+                                }
+                            }
+                        }
+                        // MATERIAL_GLASS and MATERIAL_STONE do not have physics, they are static.
+                    }
+                }
+            }
+        }
+
+
+        // --- Animation Loop ---
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+
+            if (pointerLocked) {
+                updatePlayer(delta);
+
+                // Control physics update rate
+                const currentTime = performance.now();
+                if (currentTime - lastSimulationTime > SIMULATION_INTERVAL_MS) {
+                    updateVoxelPhysics();
+                    lastSimulationTime = currentTime;
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // --- Start the application ---
+        window.onload = function() {
+            init();
+            animate();
+        };
+
+    </script>
+</body>
+</html>
