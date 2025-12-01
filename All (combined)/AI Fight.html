@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Medieval Army Simulation (Three.js + Cannon.js)</title>
+    <!-- Load Tailwind CSS for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Three.js library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Load Cannon.js for realistic physics -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <style>
+        /* Custom styles for the game container */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1f2937; /* Dark gray background */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden; /* Prevent scrolling */
+        }
+        #game-container {
+            display: flex;
+            flex-direction: column;
+            width: 95%;
+            max-width: 1000px;
+            background-color: #374151; /* Slightly lighter dark gray */
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5);
+            border-radius: 12px;
+            padding: 1rem;
+        }
+        #threejs-canvas {
+            width: 100%;
+            height: 500px;
+            border-radius: 8px;
+            overflow: hidden;
+            background-color: #111827; /* Very dark background for the scene */
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container" class="space-y-4">
+    <h1 class="text-3xl font-bold text-center text-yellow-400">Medieval Army Arena</h1>
+
+    <!-- UI for Army Health and Status -->
+    <div id="ui-overlay" class="grid grid-cols-2 gap-4 text-white">
+        <!-- Army 1: Red Order -->
+        <div class="p-3 bg-red-700/50 rounded-lg shadow-inner">
+            <div class="font-semibold text-lg flex justify-between items-center">
+                <span>The Red Order (Total HP)</span>
+                <span id="p1-score" class="text-xl font-extrabold text-red-300">HP: 500</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-3 mt-1">
+                <div id="p1-health-bar" class="bg-red-500 h-3 rounded-full transition-all duration-300" style="width: 100%"></div>
+            </div>
+        </div>
+
+        <!-- Army 2: Blue Legion -->
+        <div class="p-3 bg-blue-700/50 rounded-lg shadow-inner">
+            <div class="font-semibold text-lg flex justify-between items-center">
+                <span id="p2-score" class="text-xl font-extrabold text-blue-300">HP: 500</span>
+                <span>The Blue Legion (Total HP)</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-3 mt-1">
+                <div id="p2-health-bar" class="bg-blue-500 h-3 rounded-full transition-all duration-300" style="width: 100%"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Three.js Canvas Container -->
+    <div id="threejs-canvas"></div>
+
+    <!-- Game Status and Controls -->
+    <div class="flex flex-col sm:flex-row justify-between items-center bg-gray-800 p-3 rounded-lg">
+        <div id="game-status" class="text-xl font-bold text-green-400 mb-2 sm:mb-0">
+            WAR RAGES ON...
+        </div>
+        <button id="reset-button" class="px-6 py-2 bg-yellow-600 text-white font-bold rounded-full hover:bg-yellow-500 transition-colors shadow-lg shadow-yellow-800/50" onclick="resetGame()">
+            Reset Match
+        </button>
+    </div>
+
+</div>
+
+<script>
+    // Global Three.js and Cannon.js variables
+    let scene, camera, renderer, clock;
+    let world; // Cannon.js world
+    let container = document.getElementById('threejs-canvas');
+    let width = container.clientWidth;
+    let height = container.clientHeight;
+
+    // Game state variables
+    const ARENA_SIZE = 15;
+    const NUM_SOLDIERS = 5;
+    const ATTACK_RANGE = 1.0;
+    const ATTACK_COOLDOWN = 1.0;
+    const CATAPULT_COOLDOWN = 5.0;
+    const CATAPULT_DAMAGE = 20;
+    const TIME_STEP = 1 / 60; // Physics simulation step
+
+    let fighters = [];
+    let projectiles = [];
+    let catapults = [];
+    let army1Health = 0;
+    let army2Health = 0;
+    let gameStatusElement = document.getElementById('game-status');
+    let isGameOver = false;
+    let lastCatapultFireTime = 0;
+
+    // --- Fighter Class ---
+    class Fighter {
+        constructor(id, army, color, initialX, initialZ) {
+            this.id = id;
+            this.army = army; // 1 or 2
+            this.health = 100;
+            this.maxHealth = 100;
+            this.speed = 2.5;
+            this.damage = 10;
+            this.lastAttackTime = 0;
+            this.isAttacking = false;
+            this.isActive = true;
+
+            this.initialX = initialX;
+            this.initialZ = initialZ;
+
+            // 1. Create 3D Mesh Group (Articulated model)
+            this.group = new THREE.Group();
+            this.createModel(color);
+            scene.add(this.group);
+
+            // 2. Create Cannon Body
+            const shape = new CANNON.Box(new CANNON.Vec3(0.3, 0.8, 0.3));
+            this.physicsBody = new CANNON.Body({
+                mass: 10,
+                position: new CANNON.Vec3(this.initialX, 0.8, this.initialZ),
+                shape: shape,
+                linearDamping: 0.9,
+                angularDamping: 0.9
+            });
+            this.physicsBody.userData = this; // Link physics body back to the fighter object
+            world.addBody(this.physicsBody);
+            
+            // Set initial rotation to face inward
+            const initialAngle = (army === 1) ? -Math.PI / 2 : Math.PI / 2;
+            this.physicsBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), initialAngle);
+            this.group.rotation.copy(this.physicsBody.quaternion);
+
+            // Setup collision listener for combat
+            this.physicsBody.addEventListener('collide', (event) => this.handleCollision(event));
+        }
+
+        createModel(color) {
+            // Head (Helm)
+            const headGeometry = new THREE.SphereGeometry(0.2, 8, 8);
+            this.head = new THREE.Mesh(headGeometry, new THREE.MeshLambertMaterial({ color: 0xffffff }));
+            this.head.position.y = 1.6;
+            this.group.add(this.head);
+
+            // Body (Torso)
+            const bodyGeometry = new THREE.BoxGeometry(0.6, 1.0, 0.4);
+            this.body = new THREE.Mesh(bodyGeometry, new THREE.MeshLambertMaterial({ color: color }));
+            this.body.position.y = 1.0;
+            this.group.add(this.body);
+
+            // Weapon (Axe/Sword)
+            const weaponGeometry = new THREE.BoxGeometry(0.1, 0.1, 1.0);
+            const weaponMaterial = new THREE.MeshPhongMaterial({ color: 0xaaaaaa, shininess: 100 });
+            this.weapon = new THREE.Mesh(weaponGeometry, weaponMaterial);
+            this.weapon.rotation.x = Math.PI / 2; // Held horizontally by the arm
+            this.weapon.position.set(0.4, 0.0, 0.0); // Relative to body center
+
+            // Simple Arm (attached to the body for swinging)
+            const armGeometry = new THREE.BoxGeometry(0.2, 0.8, 0.2);
+            this.arm = new THREE.Mesh(armGeometry, new THREE.MeshLambertMaterial({ color: 0x555555 }));
+            this.arm.position.set(0.4, 0.25, 0);
+            this.arm.add(this.weapon);
+            this.body.add(this.arm);
+
+            // Legs (Simplified)
+            const legGeometry = new THREE.BoxGeometry(0.2, 0.5, 0.2);
+            const legMaterial = new THREE.MeshLambertMaterial({ color: 0x555555 });
+            const legL = new THREE.Mesh(legGeometry, legMaterial);
+            legL.position.set(0.15, 0.25, 0);
+            this.group.add(legL);
+            const legR = new THREE.Mesh(legGeometry, legMaterial);
+            legR.position.set(-0.15, 0.25, 0);
+            this.group.add(legR);
+        }
+
+        updateMeshPosition() {
+            // Sync Three.js mesh with Cannon.js body
+            this.group.position.copy(this.physicsBody.position);
+            this.group.quaternion.copy(this.physicsBody.quaternion);
+        }
+
+        swingWeapon() {
+            if (this.isAttacking) {
+                const time = (clock.getElapsedTime() - this.lastAttackTime);
+                const swingDuration = 0.3;
+
+                if (time < swingDuration) {
+                    // Swing weapon up and out by rotating the arm
+                    const swingAngle = Math.sin((time / swingDuration) * Math.PI) * Math.PI / 3;
+                    this.arm.rotation.z = swingAngle * this.physicsBody.userData.direction;
+                } else {
+                    // End of swing: reset
+                    this.isAttacking = false;
+                    this.arm.rotation.z = 0;
+                }
+            }
+        }
+        
+        // Direction is 1 for Red Army (facing -Z) and -1 for Blue Army (facing +Z)
+        get direction() {
+            return this.army === 1 ? -1 : 1;
+        }
+
+        takeDamage(damage) {
+            if (!this.isActive || isGameOver) return;
+
+            this.health = Math.max(0, this.health - damage);
+            
+            if (this.army === 1) army1Health -= damage;
+            else army2Health -= damage;
+
+            if (this.health === 0) {
+                this.die();
+            }
+        }
+
+        die() {
+            if (!this.isActive) return;
+            this.isActive = false;
+
+            // Remove from physics world
+            world.removeBody(this.physicsBody);
+
+            // Visually sink the mesh into the floor to signify death
+            // We use a small, immediate drop followed by a larger sinking animation
+            this.group.position.y -= 0.1;
+            
+            // Change color to grey/dark to show they are defeated
+            this.body.material.color.setHex(0x333333);
+            this.head.material.color.setHex(0x111111);
+
+            // Ensure the physics body is completely inactive/removed so it doesn't cause collision bugs
+        }
+
+        handleCollision(event) {
+            const body = event.body;
+            if (body.userData && body.userData.isCatapultProjectile) {
+                // If hit by a projectile, take heavy damage
+                this.takeDamage(CATAPULT_DAMAGE);
+
+                // Apply massive force impulse to simulate explosion/impact
+                const relativePos = new CANNON.Vec3();
+                body.position.vsub(this.physicsBody.position, relativePos);
+                relativePos.normalize();
+                
+                const impulseStrength = 50;
+                this.physicsBody.applyImpulse(
+                    new CANNON.Vec3(relativePos.x * impulseStrength, impulseStrength / 2, relativePos.z * impulseStrength), 
+                    this.physicsBody.position
+                );
+            }
+        }
+    }
+
+    // --- Catapult Projectile Class ---
+    class Projectile {
+        constructor(position, velocity) {
+            this.isCatapultProjectile = true;
+            
+            // Three.js Mesh
+            const geometry = new THREE.SphereGeometry(0.3, 8, 8);
+            const material = new THREE.MeshPhongMaterial({ color: 0x996600 }); // Stone/metal ball
+            this.mesh = new THREE.Mesh(geometry, material);
+            scene.add(this.mesh);
+
+            // Cannon.js Body
+            const shape = new CANNON.Sphere(0.3);
+            this.physicsBody = new CANNON.Body({
+                mass: 20,
+                position: new CANNON.Vec3(position.x, position.y, position.z),
+                velocity: new CANNON.Vec3(velocity.x, velocity.y, velocity.z),
+                shape: shape,
+                linearDamping: 0.05,
+                angularDamping: 0.05
+            });
+            this.physicsBody.userData = this;
+            this.physicsBody.isCatapultProjectile = true;
+            world.addBody(this.physicsBody);
+        }
+
+        update() {
+            // Sync Three.js mesh with Cannon.js body
+            this.mesh.position.copy(this.physicsBody.position);
+            this.mesh.quaternion.copy(this.physicsBody.quaternion);
+
+            // Remove if it hits the ground or goes out of bounds
+            if (this.physicsBody.position.y < 0.1) {
+                this.destroy();
+                return false; // Indicate destruction
+            }
+            return true;
+        }
+
+        destroy() {
+            scene.remove(this.mesh);
+            world.removeBody(this.physicsBody);
+        }
+    }
+
+
+    // --- Catapult ---
+    function fireCatapult(sourceX, sourceZ, targetX, targetZ) {
+        // Simple parabolic launch calculation
+        const distance = Math.sqrt((targetX - sourceX) ** 2 + (targetZ - sourceZ) ** 2);
+        const height = 10; // Max height of arc
+        const gravity = world.gravity.y;
+        
+        // Calculate initial Y velocity for height, and required total time
+        const initialVY = Math.sqrt(-2 * gravity * height);
+        const flightTime = initialVY * 2 / -gravity;
+        
+        // Calculate required horizontal velocity
+        const velocityXZ = distance / flightTime;
+
+        // Calculate direction vector
+        const dirX = (targetX - sourceX) / distance;
+        const dirZ = (targetZ - sourceZ) / distance;
+        
+        const initialVelocity = new THREE.Vector3(
+            dirX * velocityXZ,
+            initialVY,
+            dirZ * velocityXZ
+        );
+
+        // Fire the projectile
+        const startPos = new THREE.Vector3(sourceX, 1.0, sourceZ);
+        projectiles.push(new Projectile(startPos, initialVelocity));
+    }
+
+
+    // --- Scene & Physics Initialization ---
+    function init() {
+        // 1. Scene setup
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x111827);
+
+        // 2. Physics World setup (Cannon.js)
+        world = new CANNON.World();
+        world.gravity.set(0, -9.82, 0); // Standard gravity
+        world.broadphase = new CANNON.NaiveBroadphase();
+        world.solver.iterations = 10;
+
+        // 3. Camera setup
+        camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 100);
+        camera.position.set(0, 15, 18);
+        camera.lookAt(0, 0, 0);
+
+        // 4. Renderer setup
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(width, height);
+        container.appendChild(renderer.domElement);
+
+        // 5. Clock for delta time
+        clock = new THREE.Clock();
+
+        // 6. Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040, 5);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 3);
+        directionalLight.position.set(5, 10, 5);
+        scene.add(directionalLight);
+
+        // 7. Arena Floor (Cannon + Three.js)
+        const floorGeometry = new THREE.PlaneGeometry(ARENA_SIZE * 2, ARENA_SIZE * 2);
+        const floorMaterial = new THREE.MeshLambertMaterial({ color: 0x4b5563 });
+        const floorMesh = new THREE.Mesh(floorGeometry, floorMaterial);
+        floorMesh.rotation.x = -Math.PI / 2;
+        scene.add(floorMesh);
+
+        // Cannon Floor Body
+        const groundShape = new CANNON.Plane();
+        const groundBody = new CANNON.Body({ mass: 0 }); // mass = 0 makes it static
+        groundBody.addShape(groundShape);
+        groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2); // Rotate to face up
+        world.addBody(groundBody);
+
+        // 8. Initialize Armies and Catapults
+        initializeArmies();
+
+        // Event listener for window resize
+        window.addEventListener('resize', onWindowResize, false);
+
+        // Start the game loop
+        animate();
+    }
+
+    function initializeArmies() {
+        fighters = [];
+        army1Health = NUM_SOLDIERS * 100;
+        army2Health = NUM_SOLDIERS * 100;
+
+        const team1Color = 0x990000; // Red
+        const team2Color = 0x000099; // Blue
+        
+        // Simple Catapult Model (Static)
+        const catapultGeometry = new THREE.BoxGeometry(1.5, 1.0, 1.5);
+        const catapultMaterial = new THREE.MeshLambertMaterial({ color: 0x654321 }); // Brown wood
+        
+        // Team 1 (Red) Catapult
+        const cat1 = new THREE.Mesh(catapultGeometry, catapultMaterial);
+        cat1.position.set(-ARENA_SIZE + 2, 0.5, 0);
+        scene.add(cat1);
+        catapults.push({ mesh: cat1, targetArmy: 2 });
+        
+        // Team 2 (Blue) Catapult
+        const cat2 = new THREE.Mesh(catapultGeometry, catapultMaterial);
+        cat2.position.set(ARENA_SIZE - 2, 0.5, 0);
+        scene.add(cat2);
+        catapults.push({ mesh: cat2, targetArmy: 1 });
+
+
+        // Generate soldiers
+        for (let i = 0; i < NUM_SOLDIERS; i++) {
+            let x, z;
+            
+            // Team 1 (Red)
+            x = -ARENA_SIZE / 3 - (Math.random() * 2);
+            z = (Math.random() * 4) - 2;
+            fighters.push(new Fighter(i, 1, team1Color, x, z));
+
+            // Team 2 (Blue)
+            x = ARENA_SIZE / 3 + (Math.random() * 2);
+            z = (Math.random() * 4) - 2;
+            fighters.push(new Fighter(i + NUM_SOLDIERS, 2, team2Color, x, z));
+        }
+    }
+
+    // --- Resize Handler ---
+    function onWindowResize() {
+        width = container.clientWidth;
+        height = container.clientHeight;
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        renderer.setSize(width, height);
+    }
+    
+    // --- Physics Update ---
+    function updatePhysics() {
+        // Step the physics world
+        world.step(TIME_STEP);
+        
+        // Sync all active fighter meshes
+        fighters.filter(f => f.isActive).forEach(fighter => {
+            fighter.updateMeshPosition();
+            fighter.swingWeapon();
+        });
+
+        // Update projectiles and remove destroyed ones
+        projectiles = projectiles.filter(p => p.update());
+    }
+
+    // --- AI & Combat Logic ---
+    function updateAI(delta) {
+        if (isGameOver) return;
+        
+        const activeFighters = fighters.filter(f => f.isActive);
+        
+        activeFighters.forEach(fighter => {
+            const opponentArmy = fighter.army === 1 ? activeFighters.filter(f => f.army === 2) : activeFighters.filter(f => f.army === 1);
+            if (opponentArmy.length === 0) return;
+
+            // Simple AI: Target the closest enemy
+            let closestOpponent = opponentArmy[0];
+            let minDistance = Infinity;
+
+            opponentArmy.forEach(opponent => {
+                const distance = fighter.physicsBody.position.distanceTo(opponent.physicsBody.position);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestOpponent = opponent;
+                }
+            });
+
+            if (!closestOpponent) return;
+
+            // Combat State Machine
+            if (minDistance > ATTACK_RANGE) {
+                // State: Moving
+                
+                // Calculate direction vector and apply force
+                const targetPos = closestOpponent.physicsBody.position;
+                const currentPos = fighter.physicsBody.position;
+                
+                const direction = new CANNON.Vec3();
+                targetPos.vsub(currentPos, direction);
+                direction.normalize();
+
+                // Apply force to move the body
+                const force = direction.scale(fighter.speed * 100); 
+                fighter.physicsBody.applyForce(force, fighter.physicsBody.position);
+
+                // Update mesh rotation to face opponent
+                const angle = Math.atan2(direction.x, direction.z);
+                fighter.group.rotation.y = angle;
+                fighter.physicsBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), angle);
+
+            } else {
+                // State: Attack
+                if (clock.getElapsedTime() - fighter.lastAttackTime > ATTACK_COOLDOWN) {
+                    // ATTACK!
+                    fighter.isAttacking = true;
+                    fighter.lastAttackTime = clock.getElapsedTime();
+                    
+                    // Direct damage and physics impulse (simulating weapon impact)
+                    closestOpponent.takeDamage(fighter.damage);
+
+                    const impulseDirection = new CANNON.Vec3();
+                    closestOpponent.physicsBody.position.vsub(fighter.physicsBody.position, impulseDirection);
+                    impulseDirection.normalize();
+                    
+                    // Apply a small impulse to push back
+                    closestOpponent.physicsBody.applyImpulse(
+                        impulseDirection.scale(30), 
+                        closestOpponent.physicsBody.position
+                    );
+                }
+            }
+        });
+        
+        // Catapult Logic
+        if (clock.getElapsedTime() - lastCatapultFireTime > CATAPULT_COOLDOWN) {
+            lastCatapultFireTime = clock.getElapsedTime();
+            
+            catapults.forEach(catapult => {
+                let targetX = catapult.targetArmy === 1 ? -ARENA_SIZE / 4 : ARENA_SIZE / 4;
+                
+                // Fire at a random spot in the enemy zone
+                fireCatapult(
+                    catapult.mesh.position.x, 
+                    catapult.mesh.position.z, 
+                    targetX + (Math.random() * 5) - 2.5,
+                    (Math.random() * 5) - 2.5
+                );
+            });
+        }
+    }
+
+    // --- Game Loop ---
+    function animate() {
+        requestAnimationFrame(animate);
+
+        const delta = clock.getDelta();
+
+        if (!isGameOver) {
+            updatePhysics();
+            updateAI(delta);
+            updateGameStatus();
+        }
+
+        renderer.render(scene, camera);
+    }
+    
+    // --- UI Update and Win Condition Check ---
+    function updateGameStatus() {
+        const totalArmy1Health = Math.max(0, fighters.filter(f => f.army === 1).reduce((sum, f) => sum + f.health, 0));
+        const totalArmy2Health = Math.max(0, fighters.filter(f => f.army === 2).reduce((sum, f) => sum + f.health, 0));
+
+        // Update health bars
+        const maxHealth = NUM_SOLDIERS * 100;
+        document.getElementById('p1-health-bar').style.width = `${(totalArmy1Health / maxHealth) * 100}%`;
+        document.getElementById('p2-health-bar').style.width = `${(totalArmy2Health / maxHealth) * 100}%`;
+        document.getElementById('p1-score').textContent = `HP: ${totalArmy1Health}`;
+        document.getElementById('p2-score').textContent = `HP: ${totalArmy2Health}`;
+        
+        // Check Win Condition
+        if (totalArmy1Health <= 0 && totalArmy2Health <= 0) {
+            isGameOver = true;
+            gameStatusElement.textContent = "The Battle is a Stalemate! Both Armies Fell.";
+            gameStatusElement.classList.remove('text-green-400');
+            gameStatusElement.classList.add('text-yellow-500');
+        } else if (totalArmy1Health <= 0) {
+            isGameOver = true;
+            gameStatusElement.textContent = "VICTORY! The Blue Legion Wins!";
+            gameStatusElement.classList.remove('text-green-400', 'text-yellow-500');
+            gameStatusElement.classList.add('text-blue-400');
+        } else if (totalArmy2Health <= 0) {
+            isGameOver = true;
+            gameStatusElement.textContent = "VICTORY! The Red Order Wins!";
+            gameStatusElement.classList.remove('text-green-400', 'text-yellow-500');
+            gameStatusElement.classList.add('text-red-400');
+        } else {
+            // Display active fighter count
+            const active1 = fighters.filter(f => f.army === 1 && f.isActive).length;
+            const active2 = fighters.filter(f => f.army === 2 && f.isActive).length;
+            gameStatusElement.textContent = `Red: ${active1} soldiers | Blue: ${active2} soldiers`;
+        }
+    }
+
+    // --- Reset Function ---
+    function resetGame() {
+        isGameOver = false;
+
+        // Clean up scene and physics world
+        fighters.forEach(f => {
+            scene.remove(f.group);
+            world.removeBody(f.physicsBody);
+        });
+        projectiles.forEach(p => p.destroy());
+        catapults.forEach(c => scene.remove(c.mesh));
+        catapults = [];
+        projectiles = [];
+        
+        // Reset status text
+        gameStatusElement.textContent = "WAR RAGES ON...";
+        gameStatusElement.classList.remove('text-red-500', 'text-blue-400', 'text-yellow-500');
+        gameStatusElement.classList.add('text-green-400');
+
+        // Re-initialize everything
+        initializeArmies();
+
+        // Restart clock
+        clock.getDelta();
+    }
+
+    // Start the game once the window is loaded
+    window.onload = init;
+
+</script>
+
+</body>
+</html>
