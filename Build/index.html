@@ -1,0 +1,216 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Unblocked Games -Main Page </title>
+  <style>
+    body {
+      text-align:center;
+      font-family: sans-serif;
+      background-color: #222;
+      color: #eee;
+      margin: 0;
+      padding: 0px;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      box-sizing: border-box;
+    }
+    h1 {
+      text-align:center;
+      color: #ddd;
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    p {
+      text-align: center;
+      margin-bottom: 20px;
+      color: #aaa;
+    }
+    ul {
+      text-align: center;
+      list-style: none;
+      padding-left: 0px;
+      width: 300px;
+      align-self: center;
+    }
+    li.folder {
+      text-align: center;
+      cursor: pointer;
+      padding: 1px 1px;
+      margin-bottom: 0px;
+      border: 1px solid #555;
+      background-color: #333;
+      border-radius: 5px;
+      transition: background-color 0.3s;
+      width: 300px;
+      align-self: center;
+    }
+    li.folder:hover {
+      text-align:center;
+      background-color: #444;
+      width: 300px;
+      align-self: center;
+    }
+    li.file {
+      text-align: center;
+      padding: 1px 1px;
+      margin: 0px 0;
+      border: 1px solid #555;
+      background-color: #2a2a2a;
+      border-radius: 5px;
+      transition: background-color 0.3s;
+      width: 300px;
+      align-self: center;
+    }
+    li.file:hover {
+      text-align: center;
+      background-color: #3a3a3a;
+      width: 300px;
+      align-self: center;
+    }
+    li.file a {
+      text-align: center;
+      text-decoration: none;
+      color: #eee;
+      width: 300px;
+      align-self: center;
+      margin-bottom: 12px;
+    }
+    li.file a:hover {
+      text-align: center;
+      text-decoration: underline;
+      width: 300px;
+      align-self: center;
+    }
+    .nested {
+      text-align: center;
+      display: none;
+    }
+    .active {
+      text-align: center;
+      display: block;
+    }
+    .add-button {
+      display: block;
+      text-align: center;
+      margin: 0px auto;
+      padding: 1px 1px;
+      background-color: #333;
+      border: 1px solid #555;
+      border-radius: 5px;
+      color: #eee;
+      text-decoration: none;
+      transition: background-color 0.3s;
+      width: 300px;
+      align-self: center;
+    }
+    .add-button:hover {
+      text-align: center;
+      background-color: #444;
+      width: 300px;
+      align-self: center;
+    }
+    footer {
+      color: #777;
+      text-align: center;
+      padding: 10px;
+      font-size: 0.8em;
+      margin-top: auto;
+    }
+    footer a {
+      text-align: center;
+      color: #999;
+      text-decoration: none;
+    }
+    footer a:hover {
+      text-align: center;
+      color: #ccc;
+    }
+  </style>
+</head>
+<body>
+  <h1>Unblocked games</h1>
+  <p>Click folders to expand. Click files to open.</p>
+  <br> <br>
+  <ul id="explorer"></ul>
+  <br> <br>
+
+  <a href="https://forms.gle/atpRb7LSVMu6LPCQA" class="add-button" target="_blank">
+    ➕ Add Your Game
+  </a>
+  <br><br><br><br>
+  <a href="https://forms.office.com/r/mKEhtfS8DV" class="add-button" target="_blank">
+    Rate Our Games⭐
+  </a>
+
+  <footer>
+    <a href="https://github.com/SpeedyGuy1/speedyguy1.github.io">View on Github</a>
+  </footer>
+
+  <script>
+    const repo = "SpeedyGuy1/speedyguy1.github.io";
+    const apiBase = `https://api.github.com/repos/${repo}/contents/`;
+
+    async function fetchDir(path = "") {
+      const res = await fetch(apiBase + path);
+      if (!res.ok) return [];
+      return res.json();
+    }
+
+    async function buildTree(path = "", container) {
+  const items = await fetchDir(path);
+
+  items.sort((a, b) => {
+    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  for (const item of items) {
+    // Skip certain files and folders
+    if (
+      item.name === "index.html" || 
+      item.name === "404.html" || 
+      item.name === "Signup.html" || 
+      ["Build", "js", "patch", "TemplateData"].includes(item.name)
+    ) continue;
+
+    const li = document.createElement("li");
+
+    if (item.type === "dir") {
+      li.classList.add("folder");
+      li.textContent = item.name;
+
+      const nested = document.createElement("ul");
+      nested.classList.add("nested");
+
+      li.onclick = async function (e) {
+        e.stopPropagation();
+        if (!nested.hasChildNodes()) {
+          await buildTree(item.path, nested);
+        }
+        nested.classList.toggle("active");
+      };
+
+      li.appendChild(nested);
+    } 
+    else if (item.name.endsWith(".html")) {
+      li.classList.add("file");
+      const link = document.createElement("a");
+      link.href = "/" + item.path;
+      link.textContent = item.name.replace(".html", "");
+      li.appendChild(link);
+    } else {
+      continue;
+    }
+
+    container.appendChild(li);
+  }
+}
+
+
+    buildTree("", document.getElementById("explorer"));
+  </script>
+</body>
+</html>
