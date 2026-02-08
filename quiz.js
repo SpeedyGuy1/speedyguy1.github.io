@@ -93,33 +93,39 @@ function showResults(questions) {
   questions.forEach((q, index) => {
     const resultDiv = document.createElement('div');
     resultDiv.className = 'result';
+    const normalizedAnswers = normalizeAnswerArray(q.answer);
 
     if (q.type === 'text') {
       const input = document.getElementById(`q${index}_text`);
       const userAnswer = input ? input.value.trim().toLowerCase() : '';
-      const correctAnswers = q.answer.map(a => a.toLowerCase());
+      const correctAnswers = normalizedAnswers.map(a => a.toLowerCase());
       if (correctAnswers.includes(userAnswer)) {
         score++;
         resultDiv.textContent = `Q${index + 1}: ✅ Correct! ${q.explanation}`;
       } else {
-        resultDiv.textContent = `Q${index + 1}: ❌ Incorrect. (${q.answer.join(', ')}) ${q.explanation}`;
+        resultDiv.textContent = `Q${index + 1}: ❌ Incorrect. (${normalizedAnswers.join(', ')}) ${q.explanation}`;
       }
 
     } else if (q.type === 'multiSelect') {
       const selected = [...document.querySelectorAll(`input[name="q${index}"]:checked`)].map(i => parseInt(i.value));
-      const correctSet = new Set(q.answer);
+      const correctSet = new Set(normalizeNumberAnswers(q.answer));
       const userSet = new Set(selected);
       const isCorrect = correctSet.size === userSet.size && [...correctSet].every(a => userSet.has(a));
       if (isCorrect) {
         score++;
         resultDiv.textContent = `Q${index + 1}: ✅ Correct! ${q.explanation}`;
       } else {
-        resultDiv.textContent = `Q${index + 1}: ❌ Incorrect. Correct: ${q.answer.map(i => q.options[i]).join(', ')}. ${q.explanation}`;
+        const correctLabels = normalizeNumberAnswers(q.answer)
+          .map(i => (q.options || [])[i])
+          .filter(Boolean)
+          .join(', ');
+        resultDiv.textContent = `Q${index + 1}: ❌ Incorrect. Correct: ${correctLabels || 'See explanation.'} ${q.explanation}`;
       }
 
     } else {
       const selected = document.querySelector(`input[name="q${index}"]:checked`);
-      if (selected && parseInt(selected.value) === q.answer[0]) {
+      const correctAnswer = normalizeNumberAnswers(q.answer)[0];
+      if (selected && parseInt(selected.value) === correctAnswer) {
         score++;
         resultDiv.textContent = `Q${index + 1}: ✅ Correct! ${q.explanation}`;
       } else {
@@ -134,6 +140,18 @@ function showResults(questions) {
   finalScore.className = 'result';
   finalScore.textContent = `Your score: ${score} / ${questions.length}`;
   quizContainer.appendChild(finalScore);
+}
+
+function normalizeAnswerArray(answer) {
+  if (Array.isArray(answer)) return answer.map(String);
+  if (answer === undefined || answer === null) return [];
+  return [String(answer)];
+}
+
+function normalizeNumberAnswers(answer) {
+  if (Array.isArray(answer)) return answer.map(a => Number(a));
+  if (answer === undefined || answer === null) return [];
+  return [Number(answer)];
 }
 
 function generateAndCopy() {
