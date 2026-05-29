@@ -1,0 +1,41 @@
+speedyguy1.github.io
+Copyright (c) 2026 speedyguy1
+All Rights Reserved.
+
+This website, its source code, games, assets, scripts, designs,
+and all related content are the intellectual property of speedyguy1
+unless otherwise stated.
+
+No permission is granted to copy, modify, distribute, reupload,
+republish, sublicense, sell, or use any part of this website or its
+contents without explicit written permission from speedyguy1.
+
+This includes, but is not limited to, the following projects/files:
+
+- PHYSICS V1.9.html
+- physicstutorial.html
+- Signup.html
+- Index.html (inside build)
+- Polyverse.html
+- DOXXEDLOL.html
+- Define.html
+- New Game.html
+- Online Chat.html
+- Online Lobby.html
+- 3d Stuff.html
+- BG.html
+- Colourful.html
+- Fountain.html
+- LagMania.html
+- Maths.html
+
+Unauthorised use, reproduction, or redistribution of these materials
+may violate copyright laws.
+
+The repository and website previously hosted at:
+https://speedyguy1.github.io
+
+remain protected under default copyright law where no open source
+licence was provided.
+
+All rights reserved.
