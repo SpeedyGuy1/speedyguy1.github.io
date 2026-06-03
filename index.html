@@ -1,255 +1,151 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-
-  <title>Hello</title>
-
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-
+  <meta charset="UTF-8">
+  <title>Hello!</title>
   <style>
-    * {
+    body {
+      text-align:center;
+      font-family: sans-serif;
+      background-color: #222;
+      color: #eee;
+      margin: 0;
+      padding: 0px;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
       box-sizing: border-box;
     }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-
-      display: flex;
-      justify-content: center;
-      align-items: center;
-
-      font-family: 'Inter', sans-serif;
-
-      background:
-        linear-gradient(135deg, #0f172a, #111827, #1e293b);
-
-      overflow-x: hidden;
-      color: white;
-      padding: 30px;
-    }
-
-    /* Background glow blobs */
-
-    body::before,
-    body::after {
-      content: "";
-      position: fixed;
-      width: 400px;
-      height: 400px;
-      border-radius: 50%;
-      filter: blur(100px);
-      z-index: -1;
-    }
-
-    body::before {
-      background: #7adbf7;
-      top: -120px;
-      left: -120px;
-    }
-
-    body::after {
-      background: #ff9d42;
-      bottom: -120px;
-      right: -120px;
-    }
-
-    /* Frosted glass panel */
-
-    .glass {
-      width: min(750px, 100%);
-      padding: 35px;
-
-      border-radius: 28px;
-
-      background: rgba(255, 255, 255, 0.08);
-
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-
-      border: 1px solid rgba(255,255,255,0.12);
-
-      box-shadow:
-        0 8px 32px rgba(0,0,0,0.35),
-        inset 0 1px 1px rgba(255,255,255,0.08);
-    }
-
     h1 {
+      text-align:center;
+      color: #ddd;
       text-align: center;
-      font-size: 3rem;
-      margin-top: 0;
       margin-bottom: 10px;
     }
-
     p {
       text-align: center;
-      color: rgba(255,255,255,0.75);
-      margin-bottom: 30px;
+      margin-bottom: 20px;
+      color: #aaa;
     }
-
     ul {
+      text-align: center;
       list-style: none;
-      padding-left: 0;
-      margin: 0;
+      padding-left: 0px;
+      width: 300px;
+      align-self: center;
     }
-
-    /* Folder + file cards */
-
-    .folder,
-    .file {
-      margin-bottom: 12px;
-
-      padding: 14px 18px;
-
-      border-radius: 16px;
-
-      background: rgba(255,255,255,0.05);
-
-      border: 1px solid rgba(255,255,255,0.08);
-
-      transition:
-        transform 0.2s ease,
-        background 0.2s ease,
-        border 0.2s ease,
-        box-shadow 0.2s ease;
-
-      backdrop-filter: blur(10px);
-    }
-
-    .folder:hover,
-    .file:hover {
-      transform: translateY(-2px);
-
-      background: rgba(255,255,255,0.10);
-
-      border: 1px solid rgba(255,255,255,0.16);
-
-      box-shadow: 0 6px 18px rgba(0,0,0,0.25);
-    }
-
-    .folder {
+    li.folder {
+      text-align: center;
       cursor: pointer;
-      font-weight: 600;
+      padding: 1px 1px;
+      margin-bottom: 0px;
+      border: 1px solid #555;
+      background-color: #333;
+      border-radius: 5px;
+      transition: background-color 0.3s;
+      width: 300px;
+      align-self: center;
     }
-
-    .file a {
-      color: white;
+    li.folder:hover {
+      text-align:center;
+      background-color: #444;
+      width: 300px;
+      align-self: center;
+    }
+    li.file {
+      text-align: center;
+      padding: 1px 1px;
+      margin: 0px 0;
+      border: 1px solid #555;
+      background-color: #2a2a2a;
+      border-radius: 5px;
+      transition: background-color 0.3s;
+      width: 300px;
+      align-self: center;
+    }
+    li.file:hover {
+      text-align: center;
+      background-color: #3a3a3a;
+      width: 300px;
+      align-self: center;
+    }
+    li.file a {
+      text-align: center;
       text-decoration: none;
+      color: #eee;
+      width: 300px;
+      align-self: center;
+      margin-bottom: 12px;
+    }
+    li.file a:hover {
+      text-align: center;
+      text-decoration: underline;
+      width: 300px;
+      align-self: center;
+    }
+    .nested {
+      text-align: center;
+      display: none;
+    }
+    .active {
+      text-align: center;
       display: block;
     }
-
-    .file a:hover {
-      text-decoration: underline;
-    }
-
-    /* Nested folders animation */
-
-    .nested {
-      max-height: 0;
-      overflow: hidden;
-      transition: max-height 0.35s ease;
-      margin-top: 10px;
-      padding-left: 16px;
-    }
-
-    .nested.active {
-      max-height: 1000px;
-    }
-
-    /* Button */
-
     .add-button {
       display: block;
-
-      margin-top: 30px;
-
       text-align: center;
+      margin: 0px auto;
+      padding: 1px 1px;
+      background-color: #333;
+      border: 1px solid #555;
+      border-radius: 5px;
+      color: #eee;
       text-decoration: none;
-      color: white;
-      font-weight: 600;
-
-      padding: 14px;
-
-      border-radius: 16px;
-
-      background: rgba(255,255,255,0.08);
-
-      border: 1px solid rgba(255,255,255,0.12);
-
-      transition:
-        transform 0.2s ease,
-        background 0.2s ease,
-        border 0.2s ease;
+      transition: background-color 0.3s;
+      width: 300px;
+      align-self: center;
     }
-
     .add-button:hover {
-      transform: translateY(-2px);
-
-      background: rgba(255,255,255,0.12);
-
-      border: 1px solid rgba(255,255,255,0.18);
-    }
-
-    footer {
-      margin-top: 25px;
       text-align: center;
-      color: rgba(255,255,255,0.5);
-      font-size: 0.9rem;
+      background-color: #444;
+      width: 300px;
+      align-self: center;
     }
-
+    footer {
+      color: #777;
+      text-align: center;
+      padding: 10px;
+      font-size: 0.8em;
+      margin-top: auto;
+    }
     footer a {
-      color: rgba(255,255,255,0.7);
+      text-align: center;
+      color: #999;
       text-decoration: none;
     }
-
     footer a:hover {
-      color: white;
-    }
-
-    @media (max-width: 600px) {
-      h1 {
-        font-size: 2.2rem;
-      }
-
-      .glass {
-        padding: 24px;
-      }
+      text-align: center;
+      color: #ccc;
     }
   </style>
 </head>
-
 <body>
+  <h1>Hello World!</h1>
+  <p>Click folders to expand. Click files to open.</p>
+  <br> <br>
+  <ul id="explorer"></ul>
+  <br> <br>
 
-  <div class="glass">
+  <a href="https://forms.gle/atpRb7LSVMu6LPCQA" class="add-button" target="_blank">
+    ➕ Add Your Game
+  </a>
+  <br><br><br><br>
 
-    <h1>Hello World!</h1>
 
-    <p>
-      Click folders to expand. Click games to open.
-    </p>
-
-    <ul id="explorer"></ul>
-
-    <a
-      href="https://forms.gle/atpRb7LSVMu6LPCQA"
-      class="add-button"
-      target="_blank"
-    >
-      ➕ Add Your Game
-    </a>
-
-    <footer>
-      <a href="https://github.com/SpeedyGuy1/speedyguy1.github.io">
-        View on GitHub
-      </a>
-    </footer>
-
-  </div>
+  <footer>
+    <a href="https://github.com/SpeedyGuy1/speedyguy1.github.io">View on Github</a>
+  </footer>
 
   <script>
     const repo = "SpeedyGuy1/speedyguy1.github.io";
@@ -257,90 +153,64 @@
 
     async function fetchDir(path = "") {
       const res = await fetch(apiBase + path);
-
       if (!res.ok) return [];
-
       return res.json();
     }
 
     async function buildTree(path = "", container) {
+  const items = await fetchDir(path);
 
-      const items = await fetchDir(path);
+  items.sort((a, b) => {
+    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
 
-      items.sort((a, b) => {
+  for (const item of items) {
+    // Skip certain files and folders
+    if (
+      item.name === "index.html" || 
+      item.name === "404.html" || 
+      item.name === "physicstutorial.html" || 
+      item.name === "Signup.html" || 
+      item.name === "Polyverse_b.html" ||
+      ["Build", "js", "patch", "TemplateData"].includes(item.name)
+    ) continue;
 
-        if (a.type !== b.type) {
-          return a.type === "dir" ? -1 : 1;
+    const li = document.createElement("li");
+
+    if (item.type === "dir") {
+      li.classList.add("folder");
+      li.textContent = item.name;
+
+      const nested = document.createElement("ul");
+      nested.classList.add("nested");
+
+      li.onclick = async function (e) {
+        e.stopPropagation();
+        if (!nested.hasChildNodes()) {
+          await buildTree(item.path, nested);
         }
+        nested.classList.toggle("active");
+      };
 
-        return a.name.localeCompare(b.name);
-      });
-
-      for (const item of items) {
-
-        if (
-          item.name === "index.html" ||
-          item.name === "404.html" ||
-          item.name === "physicstutorial.html" ||
-          item.name === "Signup.html" ||
-          item.name === "Polyverse_b.html" ||
-          ["Build", "js", "patch", "TemplateData"].includes(item.name)
-        ) continue;
-
-        const li = document.createElement("li");
-
-        /* Folder */
-
-        if (item.type === "dir") {
-
-          li.classList.add("folder");
-
-          li.innerHTML = `📁 ${item.name}`;
-
-          const nested = document.createElement("ul");
-
-          nested.classList.add("nested");
-
-          li.onclick = async function (e) {
-
-            e.stopPropagation();
-
-            if (!nested.hasChildNodes()) {
-              await buildTree(item.path, nested);
-            }
-
-            nested.classList.toggle("active");
-          };
-
-          li.appendChild(nested);
-        }
-
-        /* HTML Files */
-
-        else if (item.name.endsWith(".html")) {
-
-          li.classList.add("file");
-
-          const link = document.createElement("a");
-
-          link.href = "/" + item.path;
-
-          link.textContent =
-            "" + item.name.replace(".html", "");
-
-          li.appendChild(link);
-        }
-
-        else {
-          continue;
-        }
-
-        container.appendChild(li);
-      }
+      li.appendChild(nested);
+    } 
+    else if (item.name.endsWith(".html")) {
+      li.classList.add("file");
+      const link = document.createElement("a");
+      link.href = "/" + item.path;
+      link.textContent = item.name.replace(".html", "");
+      li.appendChild(link);
+    } else {
+      continue;
     }
+
+    container.appendChild(li);
+  }
+}
+
 
     buildTree("", document.getElementById("explorer"));
   </script>
-
 </body>
 </html>
